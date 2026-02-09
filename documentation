@@ -1,117 +1,132 @@
-## Fine_tune-BLIP_on_an_image_captioning_dataset.ipynb — Documentation
+## 5_Levels_Of-Text_Splitting.ipynb — Documentation
 
 Short description
 -----------------
-This notebook demonstrates how to fine-tune the BLIP image-captioning model (Salesforce/blip-image-captioning-base) on a small image-caption dataset (the `ybelkada/football-dataset`) using PyTorch primitives (custom Dataset + DataLoader) and the Hugging Face Transformers/Processors API. It includes setup, dataset loading, dataset wrapper, model/processor loading, a simple manual training loop, and inference examples (including loading a model from the Hub).
+This notebook is a tutorial on strategies for splitting (chunking) long text into smaller pieces for use with language models and retrieval systems. It walks through five levels of splitting:
+
+- Level 1: Character Splitting — fixed-size character chunks (basic)
+- Level 2: Recursive Character Text Splitting — recursive splitting using layered separators (paragraphs, newlines, spaces)
+- Level 3: Document-Specific Splitting — splitters tailored to document types (Markdown, Python, JS)
+- Level 4: Semantic Chunking — grouping by meaning using embeddings and semantic similarity
+- Level 5: Agentic Chunking — using a language model as an agent to propose chunk boundaries
+
+The notebook uses LangChain text splitters and demonstrates examples and code for each level.
 
 Intended audience
 ------------------
-- Users familiar with Python and basic PyTorch.
-- People wanting a minimal example of fine-tuning BLIP for image captioning using Hugging Face Transformers and `datasets`.
+- Engineers and researchers preparing documents for retrieval-augmented generation (RAG) or long-context LLM apps.
+- People learning practical chunking strategies and LangChain splitters.
 
 Files / cells overview (high level)
 ---------------------------------
-- Setup / pip installs (install `transformers` from git main and `datasets`).
-- Load dataset (loads `ybelkada/football-dataset`).
-- PyTorch Dataset wrapper: `ImageCaptioningDataset`.
-- Load processor and model (Salesforce/blip-image-captioning-base).
-- Create DataLoader and manual training loop.
-- Inference examples and Hub loading for a fine-tuned model.
+- Intro + motivation
+- Level 1: Character split examples (manual + LangChain CharacterTextSplitter)
+- Level 2: RecursiveCharacterTextSplitter examples and metadata tagging
+- Level 3: Document specific splitters (Markdown, Python, JS)
+- Level 4: Semantic Chunking (SemanticChunker and embeddings example)
+- Level 5: Agentic Chunking (LLM-guided chunking with markers)
 
 Dependencies
 ------------
-From the notebook:
-- Python 3.x
-- pip packages (not pinned):
-  - transformers (installed from git main in the notebook: `git+https://github.com/huggingface/transformers.git@main`)
-  - datasets
-  - torch (required but not installed in the notebook; must be available)
-  - matplotlib (used for visualization)
+Notebook installs or expects the following packages (not pinned):
+- langchain-text-splitters
+- langchain_experimental
+- langchain_openai
+- openai (or `openai` SDK used by LangChain wrappers)
+- numpy
+- scikit-learn (for cosine_similarity demo)
 
-Suggested minimal requirements (for a `requirements.txt`):
-- torch>=1.10
-- transformers>=4.0
-- datasets
-- matplotlib
-- pillow
+Make sure you have a working OpenAI API key and that any Colab-specific helpers are replaced when running locally. The notebook mixes Colab helpers (`google.colab.userdata`) for retrieving secrets — replace with environment variables locally.
 
 How to run (quick start)
 ------------------------
-1. Install dependencies (adapt torch to your CUDA/CPU):
+1. Install modules (adapt to your environment):
 
 ```bash
-pip install git+https://github.com/huggingface/transformers.git@main
-pip install datasets matplotlib torch
+pip install -U langchain-text-splitters langchain_experimental langchain_openai openai numpy scikit-learn
 ```
 
-2. Open the notebook `lab1/Fine_tune-BLIP_on_an_image_captioning_dataset.ipynb` and run cells sequentially.
+2. Provide an OpenAI API key (example for macOS zsh):
 
-Key steps in the notebook
-- Load dataset:
-  `dataset = load_dataset("ybelkada/football-dataset", split="train")`
-- Create processor and model:
-  `processor = AutoProcessor.from_pretrained("Salesforce/blip-image-captioning-base")`
-  `model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")`
-- Wrap dataset and create dataloader:
-  `train_dataset = ImageCaptioningDataset(dataset, processor)`
-  `train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=2)`
-- Manual training loop (example uses 50 epochs, AdamW lr=5e-5).
+```bash
+export OPENAI_API_KEY="sk-..."
+```
 
-Notes
-- Device selection uses `device = "cuda" if torch.cuda.is_available() else "cpu"`.
-- The notebook expects `torch` to be installed and available.
+3. Open and run `lab2/5_Levels_Of-Text_Splitting.ipynb` sequentially. Replace Colab-specific secret loading with the environment variable where needed.
 
-Key code pieces (explanations)
-------------------------------
-- PyTorch Dataset wrapper:
-  - Purpose: produce the dict of tensors required by the processor/model (input_ids, pixel_values, attention_mask, ...).
-  - `ImageCaptioningDataset.__getitem__` calls `processor(images=item["image"], text=item["text"], padding="max_length", return_tensors="pt")` and squeezes the batch dim.
+Key code & concepts per level
+----------------------------
+- Level 1 — Character Splitting
+  - Manual approach: slice strings by a fixed chunk size and optional overlap.
+  - LangChain helper: `CharacterTextSplitter(chunk_size, chunk_overlap)` and `create_documents` which returns document objects with metadata.
 
-- Model & Processor load:
-  - `AutoProcessor.from_pretrained("Salesforce/blip-image-captioning-base")`
-  - `BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")`
+- Level 2 — Recursive Character Text Splitting
+  - Use `RecursiveCharacterTextSplitter(chunk_size, chunk_overlap)` which splits by a hierarchy of separators (paragraphs, newlines, spaces, chars).
+  - It attempts to split at the highest-level separators first (paragraphs) and only resorts to lower-level separators if needed.
+  - Example shows setting chunk_size from small to large to get paragraph-level splits.
 
-- Training loop (manual):
-  - `optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)`
-  - For each batch: move tensors to device, call `model(..., labels=input_ids)`, compute `loss`, backward, `optimizer.step()`, `optimizer.zero_grad()`.
+- Level 3 — Document-Specific Splitting
+  - Use specialized splitters: `MarkdownTextSplitter`, `PythonCodeTextSplitter`, and `RecursiveCharacterTextSplitter.from_language(Language.JS)`.
+  - They use document-aware separators (headers, code fences, class/def lines, function keywords) to preserve structure.
 
-- Inference:
-  - `inputs = processor(images=image, return_tensors="pt").to(device)`
-  - `generated_ids = model.generate(pixel_values=inputs.pixel_values, max_length=50)`
-  - `generated_caption = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]`
+- Level 4 — Semantic Chunking
+  - Uses `SemanticChunker` from `langchain_experimental.text_splitter` with embedding models to group by meaning.
+  - Example demonstrates creating embeddings (OpenAI) and computing cosine similarity to show semantic grouping.
+  - Requires embeddings API (OpenAI or other provider) and careful handling of API credentials and costs.
+
+- Level 5 — Agentic Chunking
+  - Uses an LLM (via `ChatOpenAI` / LangChain) as an agent: the notebook constructs a prompt with rules, asks the model to return the original text annotated with `<<<SPLIT>>>` markers, then splits on those markers.
+  - Pros: flexible and can follow complex heuristics. Cons: cost, variability, and dependence on LLM output formatting.
 
 Contract (inputs / outputs / error modes)
 ---------------------------------------
 - Inputs:
-  - Images: PIL images or arrays from the dataset image column.
-  - Captions: strings stored in dataset["text"].
+  - Plain text strings or documents (strings, file contents, code samples, markdown).
+  - Optionally embeddings API access for semantic chunking.
 - Outputs:
-  - Training produces a loss value and updates model weights.
-  - Inference produces generated token ids decoded into caption strings.
+  - Lists of chunk strings or LangChain Document objects with metadata (e.g., chunk index, source).
+  - For agentic chunking: LLM-marked text that must be parsed reliably.
 - Error modes:
-  - Missing/corrupted images will break the processor; filter or add try/except.
-  - Incompatible model/processor versions will raise runtime errors.
+  - Small chunk sizes can produce degenerate chunks (single words or characters).
+  - API failures (rate limits, auth) when using embeddings or LLMs.
+  - Variability and formatting errors when parsing LLM responses (missing markers).
 
-Edge cases and recommendations
-------------------------------
-- Small batch_size (2) may cause noisy gradients; use gradient accumulation if necessary.
-- No validation set or metric tracking: add a split and compute relevant metrics (BLEU, CIDEr, etc.).
-- No checkpoint saving: add periodic `model.save_pretrained(output_dir)` and `processor.save_pretrained(output_dir)`.
-- Use mixed precision (AMP) to reduce memory and speed up GPU training.
+Edge cases & recommendations
+----------------------------
+- Choose chunk sizes appropriate to your embedding model's context window and the downstream retrieval needs.
+- Use chunk overlap to preserve context at boundaries; tune the overlap size.
+- For document types, prefer document-aware splitters (Markdown, code) to preserve logical units.
+- For semantic chunking, test with a small sample first and monitor API costs and latency.
+- For agentic chunking, add strict output format instructions and fallback heuristics in case markers are missing.
 
 Suggested small improvements
 --------------------------
-- Save checkpoints periodically.
-- Add a learning rate scheduler (e.g., linear with warmup).
-- Add validation loop and logging (TensorBoard or Weights & Biases).
-- Use `transformers.Trainer` or `accelerate` for more robust training, multi-GPU support and easier logging.
+- Replace Colab `userdata` secret loading with environment variables (e.g., `os.environ['OPENAI_API_KEY']`).
+- Add unit tests for splitting behavior on representative inputs (prose, markdown, code) to prevent regressions.
+- Serialize chunk outputs to JSON/NDJSON with metadata for downstream indexing.
+- Add a validation cell that ensures LLM responses include the expected split markers and cleans the output robustly.
+
+Try-it snippet (local)
+----------------------
+Small snippet to test RecursiveCharacterTextSplitter locally:
+
+```python
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+text = """Your long text here..."""
+splitter = RecursiveCharacterTextSplitter(chunk_size=450, chunk_overlap=0)
+docs = splitter.create_documents([text])
+for i,d in enumerate(docs):
+    print(i, len(d.page_content))
+    print(d.page_content[:200])
+    print('---')
+```
 
 Next steps (optional)
 ---------------------
-- Convert the notebook to a script with CLI args (epochs, batch_size, lr, output_dir).
-- Add validation/evaluation and checkpointing.
-- Integrate `accelerate` for mixed precision and multi-GPU training.
+- Add a robust notebook-to-script conversion that exports chunks + metadata to a JSONL file.
+- Add small unit tests and sample inputs to a `tests/` directory.
+- Build a small CLI (Python script) to choose splitting strategies and parameters, for reproducible chunking across datasets.
 
----
-File: `lab1/Fine_tune-BLIP_on_an_image_captioning_dataset.ipynb`
-Purpose: documentation for that notebook (copied here on user request).
+File: `lab2/5_Levels_Of-Text_Splitting.ipynb`
+Purpose: documentation for that notebook (created on user request).
