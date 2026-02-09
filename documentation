@@ -1,0 +1,117 @@
+## Fine_tune-BLIP_on_an_image_captioning_dataset.ipynb — Documentation
+
+Short description
+-----------------
+This notebook demonstrates how to fine-tune the BLIP image-captioning model (Salesforce/blip-image-captioning-base) on a small image-caption dataset (the `ybelkada/football-dataset`) using PyTorch primitives (custom Dataset + DataLoader) and the Hugging Face Transformers/Processors API. It includes setup, dataset loading, dataset wrapper, model/processor loading, a simple manual training loop, and inference examples (including loading a model from the Hub).
+
+Intended audience
+------------------
+- Users familiar with Python and basic PyTorch.
+- People wanting a minimal example of fine-tuning BLIP for image captioning using Hugging Face Transformers and `datasets`.
+
+Files / cells overview (high level)
+---------------------------------
+- Setup / pip installs (install `transformers` from git main and `datasets`).
+- Load dataset (loads `ybelkada/football-dataset`).
+- PyTorch Dataset wrapper: `ImageCaptioningDataset`.
+- Load processor and model (Salesforce/blip-image-captioning-base).
+- Create DataLoader and manual training loop.
+- Inference examples and Hub loading for a fine-tuned model.
+
+Dependencies
+------------
+From the notebook:
+- Python 3.x
+- pip packages (not pinned):
+  - transformers (installed from git main in the notebook: `git+https://github.com/huggingface/transformers.git@main`)
+  - datasets
+  - torch (required but not installed in the notebook; must be available)
+  - matplotlib (used for visualization)
+
+Suggested minimal requirements (for a `requirements.txt`):
+- torch>=1.10
+- transformers>=4.0
+- datasets
+- matplotlib
+- pillow
+
+How to run (quick start)
+------------------------
+1. Install dependencies (adapt torch to your CUDA/CPU):
+
+```bash
+pip install git+https://github.com/huggingface/transformers.git@main
+pip install datasets matplotlib torch
+```
+
+2. Open the notebook `lab1/Fine_tune-BLIP_on_an_image_captioning_dataset.ipynb` and run cells sequentially.
+
+Key steps in the notebook
+- Load dataset:
+  `dataset = load_dataset("ybelkada/football-dataset", split="train")`
+- Create processor and model:
+  `processor = AutoProcessor.from_pretrained("Salesforce/blip-image-captioning-base")`
+  `model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")`
+- Wrap dataset and create dataloader:
+  `train_dataset = ImageCaptioningDataset(dataset, processor)`
+  `train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=2)`
+- Manual training loop (example uses 50 epochs, AdamW lr=5e-5).
+
+Notes
+- Device selection uses `device = "cuda" if torch.cuda.is_available() else "cpu"`.
+- The notebook expects `torch` to be installed and available.
+
+Key code pieces (explanations)
+------------------------------
+- PyTorch Dataset wrapper:
+  - Purpose: produce the dict of tensors required by the processor/model (input_ids, pixel_values, attention_mask, ...).
+  - `ImageCaptioningDataset.__getitem__` calls `processor(images=item["image"], text=item["text"], padding="max_length", return_tensors="pt")` and squeezes the batch dim.
+
+- Model & Processor load:
+  - `AutoProcessor.from_pretrained("Salesforce/blip-image-captioning-base")`
+  - `BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")`
+
+- Training loop (manual):
+  - `optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)`
+  - For each batch: move tensors to device, call `model(..., labels=input_ids)`, compute `loss`, backward, `optimizer.step()`, `optimizer.zero_grad()`.
+
+- Inference:
+  - `inputs = processor(images=image, return_tensors="pt").to(device)`
+  - `generated_ids = model.generate(pixel_values=inputs.pixel_values, max_length=50)`
+  - `generated_caption = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]`
+
+Contract (inputs / outputs / error modes)
+---------------------------------------
+- Inputs:
+  - Images: PIL images or arrays from the dataset image column.
+  - Captions: strings stored in dataset["text"].
+- Outputs:
+  - Training produces a loss value and updates model weights.
+  - Inference produces generated token ids decoded into caption strings.
+- Error modes:
+  - Missing/corrupted images will break the processor; filter or add try/except.
+  - Incompatible model/processor versions will raise runtime errors.
+
+Edge cases and recommendations
+------------------------------
+- Small batch_size (2) may cause noisy gradients; use gradient accumulation if necessary.
+- No validation set or metric tracking: add a split and compute relevant metrics (BLEU, CIDEr, etc.).
+- No checkpoint saving: add periodic `model.save_pretrained(output_dir)` and `processor.save_pretrained(output_dir)`.
+- Use mixed precision (AMP) to reduce memory and speed up GPU training.
+
+Suggested small improvements
+--------------------------
+- Save checkpoints periodically.
+- Add a learning rate scheduler (e.g., linear with warmup).
+- Add validation loop and logging (TensorBoard or Weights & Biases).
+- Use `transformers.Trainer` or `accelerate` for more robust training, multi-GPU support and easier logging.
+
+Next steps (optional)
+---------------------
+- Convert the notebook to a script with CLI args (epochs, batch_size, lr, output_dir).
+- Add validation/evaluation and checkpointing.
+- Integrate `accelerate` for mixed precision and multi-GPU training.
+
+---
+File: `lab1/Fine_tune-BLIP_on_an_image_captioning_dataset.ipynb`
+Purpose: documentation for that notebook (copied here on user request).
